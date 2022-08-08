@@ -33,6 +33,11 @@ use std::{io, ops::Rem};
 /// }
 /// ```
 
+pub struct SelectionResult {
+    pub selection: Option<usize>,
+    pub button: console::Key,
+}
+
 pub struct FuzzySelect<'a> {
     default: usize,
     items: Vec<String>,
@@ -117,7 +122,7 @@ impl FuzzySelect<'_> {
     /// Result contains `index` of selected item if user hit 'Enter'.
     /// This unlike [interact_opt](#method.interact_opt) does not allow to quit with 'Esc' or 'q'.
     #[inline]
-    pub fn interact(&self) -> io::Result<usize> {
+    pub fn interact(&self) -> io::Result<SelectionResult> {
         self.interact_on(&Term::stderr())
     }
 
@@ -127,25 +132,25 @@ impl FuzzySelect<'_> {
     /// The dialog is rendered on stderr.
     /// Result contains `Some(index)` if user hit 'Enter' or `None` if user cancelled with 'Esc' or 'q'.
     #[inline]
-    pub fn interact_opt(&self) -> io::Result<Option<usize>> {
+    pub fn interact_opt(&self) -> io::Result<Option<SelectionResult>> {
         self.interact_on_opt(&Term::stderr())
     }
 
     /// Like `interact` but allows a specific terminal to be set.
     #[inline]
-    pub fn interact_on(&self, term: &Term) -> io::Result<usize> {
+    pub fn interact_on(&self, term: &Term) -> io::Result<SelectionResult> {
         self._interact_on(term, false)?
             .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Quit not allowed in this case"))
     }
 
     /// Like `interact` but allows a specific terminal to be set.
     #[inline]
-    pub fn interact_on_opt(&self, term: &Term) -> io::Result<Option<usize>> {
+    pub fn interact_on_opt(&self, term: &Term) -> io::Result<Option<SelectionResult>> {
         self._interact_on(term, true)
     }
 
     /// Like `interact` but allows a specific terminal to be set.
-    fn _interact_on(&self, term: &Term, allow_quit: bool) -> io::Result<Option<usize>> {
+    fn _interact_on(&self, term: &Term, allow_quit: bool) -> io::Result<Option<SelectionResult>> {
         let mut position = 0;
         let mut search_term = String::new();
 
@@ -199,16 +204,22 @@ impl FuzzySelect<'_> {
                 term.flush()?;
             }
 
-            match term.read_key()? {
-                Key::Escape if allow_quit => {
+            let read_key = term.read_key()?;
+            match read_key {
+                Key::Escape | Key::Tab | Key::BackTab if allow_quit => {
                     if self.clear {
                         render.clear()?;
                         term.flush()?;
                     }
                     term.show_cursor()?;
-                    return Ok(None);
+
+                    let a = SelectionResult {
+                        button: read_key,
+                        selection: Option::None,
+                    };
+                    return Ok(Some(a));
                 }
-                Key::ArrowUp | Key::BackTab if !filtered_list.is_empty() => {
+                Key::ArrowUp if !filtered_list.is_empty() => {
                     if sel == 0 {
                         starting_row =
                             filtered_list.len().max(visible_term_rows) - visible_term_rows;
@@ -223,7 +234,7 @@ impl FuzzySelect<'_> {
                     }
                     term.flush()?;
                 }
-                Key::ArrowDown | Key::Tab if !filtered_list.is_empty() => {
+                Key::ArrowDown if !filtered_list.is_empty() => {
                     if sel == !0 {
                         sel = 0;
                     } else {
@@ -259,7 +270,11 @@ impl FuzzySelect<'_> {
                         self.items.iter().position(|item| item.eq(sel_string));
 
                     term.show_cursor()?;
-                    return Ok(sel_string_pos_in_items);
+                    let a = SelectionResult {
+                        button: Key::Enter,
+                        selection: sel_string_pos_in_items,
+                    };
+                    return Ok(Some(a));
                 }
                 Key::Backspace if position > 0 => {
                     position -= 1;
@@ -273,7 +288,6 @@ impl FuzzySelect<'_> {
                     sel = 0;
                     starting_row = 0;
                 }
-
                 _ => {}
             }
 
